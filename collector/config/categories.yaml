@@ -1,0 +1,30 @@
+# 파일럿 카테고리 · 키워드 정의
+# - ko: 네이버 쇼핑 검색에 쓰는 한글 키워드
+# - en: 알리익스프레스·아마존 검색에 쓰는 영문 키워드 (Phase 2)
+# - 20개로 시작. 파일럿 결과 보고 늘리거나 바꾼다.
+
+categories:
+  - id: kitchen_living
+    name: 주방잡화·생활소품
+    amazon_bestseller_path: /gp/movers-and-shakers/kitchen   # Phase 2
+    keywords:
+      - { ko: 실리콘 주걱,            en: silicone spatula }
+      - { ko: 실리콘 뚜껑,            en: silicone stretch lids }
+      - { ko: 채소 다지기,            en: vegetable chopper }
+      - { ko: 마늘 다지기,            en: garlic press }
+      - { ko: 계란 삶기,              en: egg cooker }
+      - { ko: 야채 탈수기,            en: salad spinner }
+      - { ko: 밀폐용기 세트,          en: food storage containers set }
+      - { ko: 접이식 도마,            en: folding cutting board }
+      - { ko: 수세미 거치대,          en: sponge holder sink caddy }
+      - { ko: 싱크대 물막이,          en: sink splash guard }
+      - { ko: 조미료 통 세트,         en: spice jar set }
+      - { ko: 오일 스프레이,          en: oil sprayer bottle }
+      - { ko: 계량스푼 세트,          en: measuring spoons set }
+      - { ko: 감자 필러,              en: vegetable peeler }
+      - { ko: 병따개 다용도,          en: multi jar opener }
+      - { ko: 냉장고 정리 트레이,     en: fridge organizer bins }
+      - { ko: 벽걸이 키친타올 걸이,   en: paper towel holder wall mount }
+      - { ko: 물때 제거 브러시,       en: cleaning brush scrubber }
+      - { ko: 설거지 장갑,            en: dishwashing gloves }
+      - { ko: 배수구 거름망,          en: sink strainer }
