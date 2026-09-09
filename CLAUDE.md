@@ -8,7 +8,11 @@
 최종 산출물은 "오늘의 소싱 후보 TOP 20" 대시보드.
 
 ## 2. 원칙
-- 국내 데이터는 **공식 API만** 사용 (네이버 쇼핑 검색 API, 네이버 데이터랩 API). 쿠팡 스크래핑은 하지 않는다.
+- 국내 데이터는 **공식 API만** 사용. 쿠팡·네이버 스크래핑은 하지 않는다.
+  - 경쟁: **네이버 검색광고 API 키워드도구** (월간 검색수·광고 클릭수·경쟁정도)
+  - 가격: **쿠팡 파트너스 API** 상품 검색 (국내 판매가 통계)
+  - 수요 추이: **NAVER API HUB 데이터랩** (검색어트렌드·쇼핑인사이트)
+  - ※ 네이버 쇼핑 검색 API(상품수·판매처수)는 2026-07-31 종료되어 쓸 수 없다. 검색·데이터랩 API는 개발자센터가 아니라 네이버클라우드 NAVER API HUB에서 발급한다.
 - 해외 스크래핑은 하루 1~2회 배치, 요청 간 지연 2~5초, robots.txt 존중. 개인 분석 용도로 소량 수집.
 - 첫 파일럿 카테고리는 **주방잡화·생활소품** 한 개. 검증 후 확장.
 - 비전공자 사용자를 전제로 한다: 모든 스크립트는 `README`에 실행 방법 1줄과 예상 출력을 적는다.
@@ -38,8 +42,10 @@ sourcing-radar/
 │   │   ├── temu.py            # 카테고리 베스트 페이지
 │   │   ├── amazon_bestseller.py  # movers-and-shakers 순위
 │   │   ├── alibaba1688.py     # 도매가·MOQ (소싱 원가 추정용)
-│   │   ├── naver_shopping.py  # 공식 API: 상품수·최저가·판매처 수
-│   │   └── naver_datalab.py   # 공식 API: 키워드 검색 트렌드
+│   │   ├── naver_searchad.py  # 공식 API: 월간 검색수·광고 클릭수·경쟁정도
+│   │   ├── coupang_partners.py # 공식 API: 쿠팡 검색 결과 가격 통계
+│   │   ├── naver_datalab.py   # 공식 API(HUB): 검색어트렌드·쇼핑인사이트 30일 변화율
+│   │   └── domestic.py        # 위 세 가지를 키워드별 한 행으로 합침
 │   ├── matching/
 │   │   ├── embed.py           # 텍스트+이미지 임베딩 생성
 │   │   └── cluster.py         # 유사 상품 클러스터링 (HDBSCAN)
@@ -91,16 +97,19 @@ create table cluster_members (
   primary key (cluster_id, raw_product_id)
 );
 
--- 국내 경쟁 상황 (네이버 API)
+-- 국내 경쟁 상황 (검색광고 + 쿠팡 파트너스 + 데이터랩)
 create table domestic_signals (
   cluster_id bigint references clusters(id),
   collected_at date not null,
   keyword text,
-  naver_product_count int,         -- 검색 결과 상품 수
-  naver_seller_count int,          -- 판매처 수(추정)
-  naver_min_price_krw int,
-  naver_avg_price_krw int,
-  search_trend_30d numeric,        -- 데이터랩 지수 변화율
+  ad_monthly_search int,           -- 검색광고: 월간 검색수 (PC+모바일)
+  ad_monthly_clicks numeric,       -- 검색광고: 월평균 광고 클릭수
+  ad_comp_idx text,                -- 검색광고: 경쟁정도 (낮음|중간|높음)
+  ad_comp_score numeric,           -- 0 / 0.5 / 1
+  coupang_min_price_krw int,       -- 쿠팡 검색 결과 최저가
+  coupang_avg_price_krw int,       -- 쿠팡 검색 결과 평균가
+  search_trend_30d numeric,        -- 데이터랩 검색어트렌드 변화율
+  shopping_click_trend_30d numeric,-- 데이터랩 쇼핑인사이트 변화율
   primary key (cluster_id, collected_at)
 );
 
@@ -129,8 +138,9 @@ create table opportunity_scores (
 ## 6. 기회 점수 로직 (`scoring/opportunity.py`)
 ```
 demand      = 해외 판매량 7일 증가율 (0~1 정규화) × 0.6 + 순위 상승폭 × 0.4
-competition = log(1 + 네이버 판매처 수) 정규화          # 낮을수록 기회
-margin_rate = (네이버 평균가 − (1688 단가 × 환율 × 1.35)) / 네이버 평균가
+competition = 검색광고 경쟁정도(낮음0·중간0.5·높음1) × 0.6
+            + log(1 + 월평균 광고 클릭수) 정규화 × 0.4     # 낮을수록 기회
+margin_rate = (쿠팡 평균가 − (1688 단가 × 환율 × 1.35)) / 쿠팡 평균가
               # 1.35 = 배송·관세·수수료 대략 계수, 나중에 조정
 margin      = clip(margin_rate, 0, 0.6) / 0.6
 
@@ -143,8 +153,8 @@ total = demand × 0.4 + (1 − competition) × 0.35 + margin × 0.25
 
 ### Phase 1 — 기반 (1주)
 1. Supabase 프로젝트 생성, `schema.sql` 적용.
-2. 네이버 개발자센터에서 쇼핑검색·데이터랩 API 키 발급 → `.env`.
-3. `naver_shopping.py` 구현: 키워드 1개 넣으면 상품수·최저가·판매처 수 반환. **여기까지 되면 첫 성공.**
+2. API 키 3종 발급 → `.env`: 네이버 검색광고 API, 쿠팡 파트너스 API, NAVER API HUB(데이터랩).
+3. `naver_searchad.py`·`coupang_partners.py`·`naver_datalab.py` 구현, `domestic.py`로 합침: 키워드 1개 넣으면 경쟁정도·쿠팡 평균가·수요 추이 반환. **여기까지 되면 첫 성공.**
 4. `categories.yaml`에 파일럿 키워드 20개 작성.
 
 ### Phase 2 — 해외 수집 (1~2주)
@@ -156,7 +166,7 @@ total = demand × 0.4 + (1 − competition) × 0.35 + margin × 0.25
 ### Phase 3 — 매칭·점수 (1주)
 9. `embed.py`: 제목(다국어 임베딩) + 이미지(CLIP) → 벡터 결합.
 10. `cluster.py`: HDBSCAN으로 묶고 대표 상품명 한글화.
-11. 클러스터별 대표 키워드로 네이버 API 조회 → `domestic_signals`.
+11. 클러스터별 대표 키워드로 `domestic.py` 조회 → `domestic_signals`.
 12. `opportunity.py` 실행 → `opportunity_scores` 채우기.
 
 ### Phase 4 — 대시보드·자동화 (1주)
@@ -172,8 +182,15 @@ total = demand × 0.4 + (1 − competition) × 0.35 + margin × 0.25
 ```
 SUPABASE_URL=
 SUPABASE_SERVICE_KEY=
-NAVER_CLIENT_ID=
-NAVER_CLIENT_SECRET=
+NAVER_HUB_CLIENT_ID=          # 네이버클라우드 NAVER API HUB (데이터랩)
+NAVER_HUB_CLIENT_SECRET=
+NAVER_HUB_BASE_URL=https://naveropenapi.apigw.ntruss.com
+NAVER_HUB_AUTH_STYLE=ncp      # ncp | openapi
+NAVER_AD_CUSTOMER_ID=         # 네이버 검색광고 API
+NAVER_AD_ACCESS_LICENSE=
+NAVER_AD_SECRET_KEY=
+COUPANG_ACCESS_KEY=           # 쿠팡 파트너스 API
+COUPANG_SECRET_KEY=
 PROXY_URL=            # 선택, 해외 스크래핑용
 USD_KRW_RATE=1380     # 나중에 API로 대체
 ```

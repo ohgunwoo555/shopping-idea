@@ -7,6 +7,9 @@ categories:
   - id: kitchen_living
     name: 주방잡화·생활소품
     amazon_bestseller_path: /gp/movers-and-shakers/kitchen   # Phase 2
+    # 데이터랩 쇼핑인사이트용 네이버쇼핑 카테고리 코드. 50000008 = 생활/건강 (대분류).
+    # 더 좁히려면 네이버쇼핑에서 해당 카테고리 페이지 주소의 catId= 값을 넣는다.
+    naver_shopping_cid: "50000008"
     keywords:
       - { ko: 실리콘 주걱,            en: silicone spatula }
       - { ko: 실리콘 뚜껑,            en: silicone stretch lids }

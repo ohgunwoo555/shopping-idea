@@ -24,13 +24,36 @@ def _env(name: str, default: str = "") -> str:
     return os.getenv(name, default).strip()
 
 
+def _missing(*pairs: tuple[str, str]) -> list[str]:
+    return [name for name, value in pairs if not value]
+
+
 @dataclass(frozen=True)
 class Settings:
-    # --- 외부 서비스 키 ---
+    # --- Supabase ---
     supabase_url: str = field(default_factory=lambda: _env("SUPABASE_URL"))
     supabase_service_key: str = field(default_factory=lambda: _env("SUPABASE_SERVICE_KEY"))
-    naver_client_id: str = field(default_factory=lambda: _env("NAVER_CLIENT_ID"))
-    naver_client_secret: str = field(default_factory=lambda: _env("NAVER_CLIENT_SECRET"))
+
+    # --- NAVER API HUB (데이터랩) ---
+    naver_hub_client_id: str = field(default_factory=lambda: _env("NAVER_HUB_CLIENT_ID"))
+    naver_hub_client_secret: str = field(default_factory=lambda: _env("NAVER_HUB_CLIENT_SECRET"))
+    naver_hub_base_url: str = field(
+        default_factory=lambda: _env("NAVER_HUB_BASE_URL", "https://naveropenapi.apigw.ntruss.com").rstrip("/")
+    )
+    naver_hub_auth_style: str = field(default_factory=lambda: _env("NAVER_HUB_AUTH_STYLE", "ncp").lower())
+
+    # --- 네이버 검색광고 API ---
+    naver_ad_customer_id: str = field(default_factory=lambda: _env("NAVER_AD_CUSTOMER_ID"))
+    naver_ad_access_license: str = field(default_factory=lambda: _env("NAVER_AD_ACCESS_LICENSE"))
+    naver_ad_secret_key: str = field(default_factory=lambda: _env("NAVER_AD_SECRET_KEY"))
+    naver_ad_base_url: str = "https://api.naver.com"
+
+    # --- 쿠팡 파트너스 API ---
+    coupang_access_key: str = field(default_factory=lambda: _env("COUPANG_ACCESS_KEY"))
+    coupang_secret_key: str = field(default_factory=lambda: _env("COUPANG_SECRET_KEY"))
+    coupang_base_url: str = "https://api-gateway.coupang.com"
+    coupang_max_items: int = 50          # 가격 통계에 쓸 상품 수 (API 최대 100)
+
     proxy_url: str = field(default_factory=lambda: _env("PROXY_URL"))
 
     # --- 환율 (나중에 API로 대체) ---
@@ -41,31 +64,60 @@ class Settings:
     request_delay_max_sec: float = 5.0
     max_retries: int = 3
 
-    # --- 네이버 API 호출 설정 ---
-    naver_page_size: int = 100        # API 최대값
-    naver_max_items: int = 300        # 판매처 수 추정에 쓸 최대 상품 수 (3페이지)
+    # --- 데이터랩 추이 계산 ---
+    trend_window_days: int = 30          # 최근 30일 vs 직전 30일 비교
 
     # --- 기회 점수 가중치 (CLAUDE.md 6절) ---
     weight_demand: float = 0.4
     weight_competition: float = 0.35
     weight_margin: float = 0.25
-    landed_cost_factor: float = 1.35  # 배송·관세·수수료 계수
-    min_margin_rate: float = 0.25     # 이보다 낮으면 후보 제외
+    landed_cost_factor: float = 1.35     # 배송·관세·수수료 계수
+    min_margin_rate: float = 0.25        # 이보다 낮으면 후보 제외
     margin_cap: float = 0.6
+    # 경쟁 점수: 검색광고 경쟁정도(낮음0/중간0.5/높음1) 60% + 월간 광고클릭 로그 정규화 40%
+    comp_idx_weight: float = 0.6
+    comp_click_weight: float = 0.4
 
     # --- 경로 ---
     repo_root: Path = _REPO_ROOT
     collector_root: Path = _COLLECTOR_ROOT
     categories_path: Path = _COLLECTOR_ROOT / "config" / "categories.yaml"
 
-    def require_naver(self) -> None:
-        """네이버 키가 없으면 무엇을 해야 하는지 바로 알려준다."""
-        if not self.naver_client_id or not self.naver_client_secret:
+    # --- 키 검사: 없으면 무엇을 해야 하는지 바로 알려준다 ---
+    def require_naver_hub(self) -> None:
+        missing = _missing(
+            ("NAVER_HUB_CLIENT_ID", self.naver_hub_client_id),
+            ("NAVER_HUB_CLIENT_SECRET", self.naver_hub_client_secret),
+        )
+        if missing:
             raise RuntimeError(
-                "NAVER_CLIENT_ID / NAVER_CLIENT_SECRET 이 비어 있습니다.\n"
-                "1) https://developers.naver.com 에서 애플리케이션 등록\n"
-                "2) '검색' 과 '데이터랩(쇼핑인사이트)' API 사용 설정\n"
-                "3) 레포 루트의 .env.example 을 .env 로 복사한 뒤 키를 채우세요."
+                f"{', '.join(missing)} 이 비어 있습니다.\n"
+                "네이버클라우드 콘솔 > Services > Application Services > NAVER API HUB > Application 등록\n"
+                "(데이터랩 검색어트렌드·쇼핑인사이트 선택) 후 인증 정보를 .env 에 넣으세요."
+            )
+
+    def require_naver_ad(self) -> None:
+        missing = _missing(
+            ("NAVER_AD_CUSTOMER_ID", self.naver_ad_customer_id),
+            ("NAVER_AD_ACCESS_LICENSE", self.naver_ad_access_license),
+            ("NAVER_AD_SECRET_KEY", self.naver_ad_secret_key),
+        )
+        if missing:
+            raise RuntimeError(
+                f"{', '.join(missing)} 이 비어 있습니다.\n"
+                "https://searchad.naver.com 로그인 > 도구 > API 사용 관리 > 네이버 검색광고 API 서비스 신청 후\n"
+                "액세스라이선스·비밀키와 화면 오른쪽 위 CUSTOMER_ID 를 .env 에 넣으세요."
+            )
+
+    def require_coupang(self) -> None:
+        missing = _missing(
+            ("COUPANG_ACCESS_KEY", self.coupang_access_key),
+            ("COUPANG_SECRET_KEY", self.coupang_secret_key),
+        )
+        if missing:
+            raise RuntimeError(
+                f"{', '.join(missing)} 이 비어 있습니다.\n"
+                "https://partners.coupang.com 로그인 > 링크 생성 > API > 키 발급 후 .env 에 넣으세요."
             )
 
     def require_supabase(self) -> None:
