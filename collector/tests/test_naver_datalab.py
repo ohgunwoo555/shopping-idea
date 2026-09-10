@@ -80,3 +80,32 @@ def test_parse_errors_name_missing_field():
         c._results({"nope": 1}, "search")
     with pytest.raises(ParseError, match="ratio"):
         c._trend({"title": "a", "data": [{"period": "x"}]}, "a", "search")
+
+
+def test_env_path_override_wins():
+    object.__setattr__(s.settings, "naver_hub_search_path", "/custom/search")
+    try:
+        seen = []
+        client = httpx.Client(transport=httpx.MockTransport(
+            lambda r: (seen.append(r.url.path), httpx.Response(200, json={"results": [_series("a", [1] * 60)]}))[1]))
+        NaverDatalabCollector(RunOptions(dry_run=True), client=client).collect_many(["a"])
+        assert seen == ["/custom/search"]
+    finally:
+        object.__setattr__(s.settings, "naver_hub_search_path", "")
+
+
+def test_probe_reports_first_live_path(capsys):
+    from sources.naver_datalab import probe
+
+    def handler(req):
+        if req.url.path == "/datalab/v1/search/trend":
+            return httpx.Response(200, json={"results": []})
+        if req.url.path == "/datalab/v1/shopping/category/keywords":
+            return httpx.Response(200, json={"results": []})
+        return httpx.Response(404, text="not found")
+
+    found = probe("50000008", client=httpx.Client(transport=httpx.MockTransport(handler)))
+    assert found == {"search": "/datalab/v1/search/trend", "shopping": "/datalab/v1/shopping/category/keywords"}
+    out = capsys.readouterr().out
+    assert "NAVER_HUB_SEARCH_PATH=/datalab/v1/search/trend" in out
+    assert "✘ 404" in out

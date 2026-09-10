@@ -38,9 +38,12 @@ class Settings:
     naver_hub_client_id: str = field(default_factory=lambda: _env("NAVER_HUB_CLIENT_ID"))
     naver_hub_client_secret: str = field(default_factory=lambda: _env("NAVER_HUB_CLIENT_SECRET"))
     naver_hub_base_url: str = field(
-        default_factory=lambda: _env("NAVER_HUB_BASE_URL", "https://naveropenapi.apigw.ntruss.com").rstrip("/")
+        default_factory=lambda: _env("NAVER_HUB_BASE_URL", "https://naverapihub.apigw.ntruss.com").rstrip("/")
     )
     naver_hub_auth_style: str = field(default_factory=lambda: _env("NAVER_HUB_AUTH_STYLE", "ncp").lower())
+    # --probe 로 찾은 경로를 여기 고정할 수 있다. 비우면 auth_style 의 기본 경로를 쓴다.
+    naver_hub_search_path: str = field(default_factory=lambda: _env("NAVER_HUB_SEARCH_PATH"))
+    naver_hub_shopping_path: str = field(default_factory=lambda: _env("NAVER_HUB_SHOPPING_PATH"))
 
     # --- 네이버 검색광고 API ---
     naver_ad_customer_id: str = field(default_factory=lambda: _env("NAVER_AD_CUSTOMER_ID"))

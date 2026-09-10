@@ -57,7 +57,7 @@ pip install -e ".[dev]"
 2. 오른쪽 위 **콘솔** → 왼쪽 위 **Services → Application Services → NAVER API HUB**.
 3. 왼쪽 **Application → Application 등록** → API 목록에서 **데이터랩(검색어트렌드)** 와 **데이터랩(쇼핑인사이트)** 체크 → 다음 → 이름 `sourcing-radar` → 완료.
 4. 목록에서 방금 만든 항목의 **인증 정보** → 두 값을 `NAVER_HUB_CLIENT_ID`, `NAVER_HUB_CLIENT_SECRET` 에.
-5. 같은 화면의 **API 가이드** 링크에서 호출 주소를 확인합니다. `https://naveropenapi.apigw.ntruss.com` 이 아니면 `.env` 의 `NAVER_HUB_BASE_URL` 을 그 주소로 바꿉니다. 헤더 이름이 `X-Naver-Client-Id` 방식이면 `NAVER_HUB_AUTH_STYLE=openapi` 로 바꿉니다.
+5. 호출 주소는 `https://naverapihub.apigw.ntruss.com` 입니다(`.env.example` 기본값). 세부 경로는 3단계 뒤에 `python -m sources.naver_datalab --probe` 로 자동으로 찾습니다. 문서를 열어 볼 필요가 없습니다.
 
 ### 3. `.env` 만들기
 ```bash
@@ -68,6 +68,21 @@ cp .env.example .env        # 레포 루트에서. 윈도우: Copy-Item .env.exa
 ## 실행 방법
 
 모든 명령은 `collector/` 폴더에서, 가상환경을 켠 상태로 실행합니다.
+
+### HUB 데이터랩 주소 찾기 (처음 한 번)
+```bash
+python -m sources.naver_datalab --probe
+```
+예상 출력:
+```
+[search] 기본 주소 https://naverapihub.apigw.ntruss.com · 헤더 X-NCP-APIGW-API-KEY-ID
+   /datalab/v1/search                            → ✔ 사용 가능
+   ...
+.env 에 아래 두 줄을 넣으세요:
+NAVER_HUB_SEARCH_PATH=/datalab/v1/search
+NAVER_HUB_SHOPPING_PATH=/datalab/v1/shopping/category/keywords
+```
+출력된 두 줄을 `.env` 에 붙여 넣습니다. 전부 ✘ 이면 마지막 줄 안내대로 키·체크 항목·주소를 확인합니다.
 
 ### 키워드 1개 조회 (첫 성공 확인용)
 ```bash

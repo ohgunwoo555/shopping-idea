@@ -10,8 +10,10 @@
 - 두 API 모두 지수(ratio)만 주므로 '최근 30일 평균 / 직전 30일 평균 − 1' 로 변화율을 만든다.
 - 한 요청에 키워드 5개까지.
 
-※ 주소·헤더는 NAVER API HUB 콘솔의 'API 가이드' 를 기준으로 한다. 401/404 가 나면
-   .env 의 NAVER_HUB_BASE_URL, NAVER_HUB_AUTH_STYLE 을 콘솔 안내대로 바꾼다.
+※ 주소·경로를 모르면 먼저 이렇게 찾는다:
+    python -m sources.naver_datalab --probe
+  후보 경로를 차례로 호출해 200 이 나오는 경로를 알려 준다. 그 값을 .env 의
+  NAVER_HUB_SEARCH_PATH / NAVER_HUB_SHOPPING_PATH 에 넣으면 이후 호출은 그 경로를 쓴다.
 """
 from __future__ import annotations
 
@@ -78,7 +80,11 @@ class NaverDatalabCollector(BaseCollector):
         style = AUTH_STYLES.get(settings.naver_hub_auth_style)
         if style is None:
             raise RuntimeError(f"NAVER_HUB_AUTH_STYLE 은 ncp 또는 openapi 여야 합니다: {settings.naver_hub_auth_style!r}")
-        self.style = style
+        self.style = dict(style)
+        if settings.naver_hub_search_path:
+            self.style["search"] = settings.naver_hub_search_path
+        if settings.naver_hub_shopping_path:
+            self.style["shopping"] = settings.naver_hub_shopping_path
         self.window = settings.trend_window_days
 
     def _headers(self) -> dict[str, str]:
@@ -197,6 +203,70 @@ class NaverDatalabCollector(BaseCollector):
         return rows
 
 
+# --probe 가 시험해 볼 후보 경로. 200 이 나오는 첫 경로를 채택한다.
+PROBE_CANDIDATES: dict[str, list[str]] = {
+    "search": ["/datalab/v1/search", "/datalab/v1/search/trend", "/v1/datalab/search"],
+    "shopping": [
+        "/datalab/v1/shopping/category/keywords",
+        "/datalab/v1/shopping/keywords",
+        "/v1/datalab/shopping/category/keywords",
+    ],
+}
+
+
+def probe(cid: str | None = "50000008", client: httpx.Client | None = None) -> dict[str, str | None]:
+    """후보 경로에 실제 요청을 보내 어떤 경로가 살아 있는지 찾는다. 키워드 1개, 3일치만 요청한다."""
+    settings.require_naver_hub()
+    style = AUTH_STYLES[settings.naver_hub_auth_style]
+    headers = {
+        style["id_header"]: settings.naver_hub_client_id,
+        style["secret_header"]: settings.naver_hub_client_secret,
+        "Content-Type": "application/json",
+    }
+    end = date.today() - timedelta(days=1)
+    start = end - timedelta(days=2)
+    bodies = {
+        "search": {
+            "startDate": start.isoformat(), "endDate": end.isoformat(), "timeUnit": "date",
+            "keywordGroups": [{"groupName": "주걱", "keywords": ["주걱"]}],
+        },
+        "shopping": {
+            "startDate": start.isoformat(), "endDate": end.isoformat(), "timeUnit": "date",
+            "category": cid or "50000008", "keyword": [{"name": "주걱", "param": ["주걱"]}],
+            "device": "", "gender": "", "ages": [],
+        },
+    }
+    own = client is None
+    client = client or httpx.Client(timeout=15.0)
+    found: dict[str, str | None] = {"search": None, "shopping": None}
+    try:
+        for which, paths in PROBE_CANDIDATES.items():
+            print(f"[{which}] 기본 주소 {settings.naver_hub_base_url} · 헤더 {style['id_header']}")
+            for path in paths:
+                try:
+                    resp = client.post(settings.naver_hub_base_url + path, json=bodies[which], headers=headers)
+                except httpx.HTTPError as exc:
+                    print(f"   {path:45s} → 연결 실패: {exc}")
+                    continue
+                ok = resp.status_code == 200 and "results" in resp.text
+                mark = "✔ 사용 가능" if ok else f"✘ {resp.status_code}"
+                print(f"   {path:45s} → {mark}  {resp.text[:80].replace(chr(10), ' ') if not ok else ''}")
+                if ok and found[which] is None:
+                    found[which] = path
+    finally:
+        if own:
+            client.close()
+    print()
+    if found["search"] or found["shopping"]:
+        print(".env 에 아래 두 줄을 넣으세요:")
+        print(f"NAVER_HUB_SEARCH_PATH={found['search'] or ''}")
+        print(f"NAVER_HUB_SHOPPING_PATH={found['shopping'] or ''}")
+    else:
+        print("살아 있는 경로를 못 찾았습니다. 401 이면 키, 403 이면 Application 에 데이터랩 API 가 체크됐는지,")
+        print("전부 404 면 NAVER_HUB_BASE_URL 이 콘솔 안내와 같은지 확인한 뒤 응답 내용을 그대로 보내 주세요.")
+    return found
+
+
 def format_row(row: dict[str, Any]) -> str:
     return (
         f"키워드: {row['keyword']}\n"
@@ -210,6 +280,7 @@ def main(argv: list[str] | None = None) -> int:
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--keyword", "-k")
     group.add_argument("--all", action="store_true")
+    group.add_argument("--probe", action="store_true", help="후보 경로를 시험해 살아 있는 API 주소를 찾는다")
     parser.add_argument("--category", help="categories.yaml 의 카테고리 id (쇼핑인사이트 cid 를 여기서 가져옴)")
     parser.add_argument("--cid", help="네이버쇼핑 카테고리 코드 직접 지정 (예: 50000008)")
     parser.add_argument("--limit", type=int)
@@ -219,6 +290,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+
+    if args.probe:
+        try:
+            found = probe(args.cid)
+        except Exception as exc:
+            logger.error("실패: %s", exc)
+            return 1
+        return 0 if any(found.values()) else 1
 
     if args.keyword:
         targets = [(args.category, args.keyword)]
